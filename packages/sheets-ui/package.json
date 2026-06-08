@@ -25,12 +25,22 @@
         "ui"
     ],
     "exports": {
-        ".": "./src/index.ts",
-        "./*": "./src/*",
+        ".": {
+            "types": "./lib/types/index.d.ts",
+            "import": "./lib/es/index.js",
+            "require": "./lib/cjs/index.js"
+        },
+        "./*": {
+            "types": "./lib/types/index.d.ts",
+            "import": "./lib/es/*",
+            "require": "./lib/cjs/*"
+        },
+        "./lib/index.css": "./lib/index.css",
         "./locale/*": "./src/locale/*.ts",
         "./facade": "./src/facade/index.ts"
     },
-    "main": "./src/index.ts",
+    "main": "./lib/es/index.js",
+    "module": "./lib/es/index.js",
     "types": "./lib/types/index.d.ts",
     "publishConfig": {
         "access": "public",

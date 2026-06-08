@@ -24,10 +24,18 @@
         "service"
     ],
     "exports": {
-        ".": "./src/index.ts",
-        "./*": "./src/*"
+        ".": {
+            "types": "./lib/types/index.d.ts",
+            "import": "./src/index.ts",
+            "require": "./src/index.ts"
+        },
+        "./*": {
+            "types": "./lib/types/index.d.ts",
+            "import": "./src/*",
+            "require": "./src/*"
+        }
     },
-    "main": "./src/index.ts",
+    "main": "./lib/es/index.js",
     "types": "./lib/types/index.d.ts",
     "publishConfig": {
         "access": "public",

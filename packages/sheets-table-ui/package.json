@@ -25,12 +25,29 @@
         "ui"
     ],
     "exports": {
-        ".": "./src/index.ts",
-        "./*": "./src/*",
-        "./facade": "./src/facade/index.ts",
-        "./locale/*": "./src/locale/*.ts"
+        ".": {
+            "types": "./lib/types/index.d.ts",
+            "import": "./src/index.ts",
+            "require": "./src/index.ts"
+        },
+        "./*": {
+            "types": "./lib/types/index.d.ts",
+            "import": "./src/*",
+            "require": "./src/*"
+        },
+        "./lib/index.css": "./lib/index.css",
+        "./facade": {
+            "types": "./lib/types/facade/index.d.ts",
+            "import": "./lib/es/facade.js",
+            "require": "./lib/cjs/facade.js"
+        },
+        "./locale/*": {
+            "types": "./lib/types/locale/*.d.ts",
+            "import": "./lib/es/locale/*.js",
+            "require": "./lib/cjs/locale/*.js"
+        }
     },
-    "main": "./src/index.ts",
+    "main": "./lib/es/index.js",
     "types": "./lib/types/index.d.ts",
     "publishConfig": {
         "access": "public",

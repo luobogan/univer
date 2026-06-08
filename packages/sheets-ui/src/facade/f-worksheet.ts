@@ -23,11 +23,13 @@ import type {
     SpreadsheetRowHeader,
     SpreadsheetSkeleton,
 } from '@univerjs/engine-render';
+
 import type { ISelectionStyle } from '@univerjs/sheets';
 import type { IScrollState } from '@univerjs/sheets-ui';
 import type { FRange } from '@univerjs/sheets/facade';
 import { ICommandService, toDisposable } from '@univerjs/core';
-import { IRenderManagerService, SHEET_VIEWPORT_KEY } from '@univerjs/engine-render';
+import { IRenderManagerService, SHEET_VIEWPORT_KEY, Vector2 } from '@univerjs/engine-render';
+
 import { SetWorksheetRowIsAutoHeightCommand } from '@univerjs/sheets';
 import {
     IMarkSelectionService,
@@ -347,6 +349,23 @@ export interface IFWorksheetUIMixin {
      * ```
      */
     setRowHeaderWidth(width: number): FWorksheet;
+
+    /**
+     * Hit test: get the cell position from client coordinates.
+     * @param {number} clientX The x coordinate relative to the viewport.
+     * @param {number} clientY The y coordinate relative to the viewport.
+     * @returns {Nullable<{ row: number; column: number }>} The cell position or null.
+     * @example
+     * ```ts
+     * const fWorksheet = univerAPI.getActiveWorkbook().getSheetByName('Sheet1');
+     * if (!fWorksheet) return;
+     * const result = fWorksheet.hitTest(100, 50);
+     * if (result) {
+     *   console.log(`Cell: row=${result.row}, column=${result.column}`);
+     * }
+     * ```
+     */
+    hitTest(clientX: number, clientY: number): Nullable<{ row: number; column: number }>;
 }
 
 export class FWorksheetUIMixin extends FWorksheet implements IFWorksheetUIMixin {
@@ -458,6 +477,103 @@ export class FWorksheetUIMixin extends FWorksheet implements IFWorksheetUIMixin 
     override getSkeleton(): Nullable<SpreadsheetSkeleton> {
         const service = this._injector.get(IRenderManagerService).getRenderUnitById(this._workbook.getUnitId())?.with(SheetSkeletonManagerService);
         return service?.getSkeleton(this._worksheet.getSheetId());
+    }
+
+    /**
+     * Hit test to get the cell at the given page coordinates.
+     * @param clientX - X coordinate relative to the viewport (pageX)
+     * @param clientY - Y coordinate relative to the viewport (pageY)
+     * @returns The cell row and column at the given coordinates, or null if not found.
+     */
+    override hitTest(clientX: number, clientY: number): Nullable<{ row: number; column: number }> {
+        const unitId = this._workbook.getUnitId();
+        const renderManagerService = this._injector.get(IRenderManagerService);
+        const render = renderManagerService.getRenderUnitById(unitId);
+
+        if (!render) {
+            console.warn('[hitTest] Render not found for unitId:', unitId);
+            return null;
+        }
+
+        const scene = render.scene;
+        if (!scene) {
+            console.warn('[hitTest] Scene not found');
+            return null;
+        }
+
+        // ============================================================
+        // STEP 1: Convert client coordinates to canvas-relative coordinates
+        // monitor.getClientOffset() returns coordinates relative to viewport
+        // We need to convert to coordinates relative to the canvas element
+        // ============================================================
+        // 注意：scene.getEngine().getCanvas() 返回的是 Univer 的 Canvas 包装对象，不是 DOM 元素
+        // 需要使用 scene.getEngine().getCanvas().getCanvasElement() 获取实际的 DOM 元素
+        const engine = scene.getEngine();
+        const canvasElement = engine?.getCanvasElement();
+        let offsetX: number;
+        let offsetY: number;
+
+        if (canvasElement) {
+            const canvasRect = canvasElement.getBoundingClientRect();
+            // Client coordinates are relative to viewport, convert to canvas-relative
+            offsetX = clientX - canvasRect.left;
+            offsetY = clientY - canvasRect.top;
+        } else {
+            // Fallback: use client coordinates directly
+            offsetX = clientX;
+            offsetY = clientY;
+            console.warn('[hitTest] Canvas element not found, using client coordinates directly');
+        }
+
+        // ============================================================
+        // STEP 2: Transform coordinates using getCoordRelativeToViewport
+        // This is the SAME process as Univer's internal mouse event handling
+        // Reference: selection-shape-extension.ts line 282-304
+        //
+        // IMPORTANT: getCoordRelativeToViewport adds viewport scroll offsets
+        // to the coordinates. Then getCellByOffset internally uses scrollXY
+        // to calculate scroll offsets AGAIN, causing double offset.
+        //
+        // SOLUTION: Do NOT use getCoordRelativeToViewport.
+        // Instead, pass canvas-relative coordinates directly to getCellByOffset.
+        // getCellByOffset internally handles scroll and scale transformations.
+        // ============================================================
+
+        // Get scroll and scale information using canvas-relative coordinates
+        const coordVector = Vector2.FromArray([offsetX, offsetY]);
+        const scrollXY = scene.getScrollXYInfoByViewport(coordVector);
+        const { scaleX, scaleY } = scene.getAncestorScale();
+
+        // ============================================================
+        // STEP 3: Get skeleton
+        // ============================================================
+        const skeleton = this.getSkeleton();
+        if (!skeleton) {
+            console.warn('[hitTest] Skeleton not found');
+            return null;
+        }
+
+        // ============================================================
+        // STEP 4: Call getCellByOffset with canvas-relative coordinates
+        //
+        // getCellByOffset internally calls getTransformOffsetX/Y which does:
+        //   offsetX = offsetX / scaleX + scrollX - rowHeaderWidth
+        //   offsetY = offsetY / scaleY + scrollY - columnHeaderHeight
+        //
+        // So we should pass canvas-relative coordinates (offsetX, offsetY)
+        // and the correct scrollXY. getCellByOffset will handle the rest.
+        // ============================================================
+        const cellInfo = skeleton.getCellByOffset(offsetX, offsetY, scaleX, scaleY, scrollXY);
+
+        if (!cellInfo) {
+            console.warn('[hitTest] No cell found at coordinates', { offsetX, offsetY });
+            return null;
+        }
+
+        return {
+            row: cellInfo.actualRow,
+            column: cellInfo.actualColumn,
+        };
     }
 
     override autoResizeColumn(columnPosition: number): FWorksheet {
