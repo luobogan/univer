@@ -366,6 +366,24 @@ export interface IFWorksheetUIMixin {
      * ```
      */
     hitTest(clientX: number, clientY: number): Nullable<{ row: number; column: number }>;
+
+    /**
+     * Get the pixel rectangle of the specified cell, relative to the canvas element.
+     * This is useful for positioning overlay elements (e.g., highlight borders) on the canvas.
+     * @param {number} row The row index (0-based).
+     * @param {number} column The column index (0-based).
+     * @returns {Nullable<{ left: number; top: number; width: number; height: number }>} The pixel rectangle, or null if skeleton is not available.
+     * @example
+     * ```ts
+     * const fWorksheet = univerAPI.getActiveWorkbook().getSheetByName('Sheet1');
+     * if (!fWorksheet) return;
+     * const rect = fWorksheet.getCellRect(0, 0);
+     * if (rect) {
+     *   console.log(`Cell(0,0) rect: left=${rect.left}, top=${rect.top}, width=${rect.width}, height=${rect.height}`);
+     * }
+     * ```
+     */
+    getCellRect(row: number, column: number): Nullable<{ left: number; top: number; width: number; height: number }>;
 }
 
 export class FWorksheetUIMixin extends FWorksheet implements IFWorksheetUIMixin {
@@ -484,8 +502,16 @@ export class FWorksheetUIMixin extends FWorksheet implements IFWorksheetUIMixin 
      * @param clientX - X coordinate relative to the viewport (pageX)
      * @param clientY - Y coordinate relative to the viewport (pageY)
      * @returns The cell row and column at the given coordinates, or null if not found.
+     *          Also returns the cell's pixel position (left, top, width, height) relative to the canvas element.
      */
-    override hitTest(clientX: number, clientY: number): Nullable<{ row: number; column: number }> {
+    override hitTest(clientX: number, clientY: number): Nullable<{
+        row: number;
+        column: number;
+        left?: number;
+        top?: number;
+        width?: number;
+        height?: number;
+    }> {
         const unitId = this._workbook.getUnitId();
         const renderManagerService = this._injector.get(IRenderManagerService);
         const render = renderManagerService.getRenderUnitById(unitId);
@@ -570,9 +596,100 @@ export class FWorksheetUIMixin extends FWorksheet implements IFWorksheetUIMixin 
             return null;
         }
 
+        // Calculate cell pixel position relative to canvas
+        // Use rowHeightAccumulation and columnWidthAccumulation to get cell position
+        const row = cellInfo.actualRow;
+        const column = cellInfo.actualColumn;
+
+        // Get row height and column width accumulation arrays
+        // NOTE: rowHeightAccumulation and columnWidthAccumulation are properties of SheetSkeleton, NOT methods
+        const rowHeightAccumulation = (skeleton as any).rowHeightAccumulation as number[] | undefined;
+        const columnWidthAccumulation = (skeleton as any).columnWidthAccumulation as number[] | undefined;
+
+        let left = 0;
+        let top = 0;
+        let width = 0;
+        let height = 0;
+
+        if (rowHeightAccumulation && columnWidthAccumulation) {
+            // Calculate left position (startX)
+            if (column > 0) {
+                left = columnWidthAccumulation[column - 1] || 0;
+            }
+
+            // Calculate top position (startY)
+            if (row > 0) {
+                top = rowHeightAccumulation[row - 1] || 0;
+            }
+
+            // Calculate width and height
+            width = (columnWidthAccumulation[column] || 0) - left;
+            height = (rowHeightAccumulation[row] || 0) - top;
+        }
+
         return {
-            row: cellInfo.actualRow,
-            column: cellInfo.actualColumn,
+            row,
+            column,
+            left,
+            top,
+            width,
+            height,
+        };
+    }
+
+    /**
+     * Get the pixel rectangle of the specified cell, relative to the canvas element.
+     * This is useful for positioning overlay elements (e.g., highlight borders) on the canvas.
+     * @param row - The row index (0-based).
+     * @param column - The column index (0-based).
+     * @returns The pixel rectangle, or null if skeleton is not available.
+     */
+    override getCellRect(row: number, column: number): Nullable<{ left: number; top: number; width: number; height: number }> {
+        const skeleton = this.getSkeleton();
+        if (!skeleton) {
+            console.warn('[getCellRect] Skeleton not found');
+            return null;
+        }
+
+        // NOTE: rowHeightAccumulation and columnWidthAccumulation are properties of SheetSkeleton, NOT methods
+        const rowHeightAccumulation = (skeleton as any).rowHeightAccumulation as number[] | undefined;
+        const columnWidthAccumulation = (skeleton as any).columnWidthAccumulation as number[] | undefined;
+
+        if (!rowHeightAccumulation || !columnWidthAccumulation) {
+            console.warn('[getCellRect] Accumulation arrays not available');
+            return null;
+        }
+
+        let left = 0;
+        let top = 0;
+
+        // Calculate left position (startX)
+        if (column > 0) {
+            left = columnWidthAccumulation[column - 1] || 0;
+        }
+
+        // Calculate top position (startY)
+        if (row > 0) {
+            top = rowHeightAccumulation[row - 1] || 0;
+        }
+
+        // Calculate width and height
+        const width = (columnWidthAccumulation[column] || 0) - left;
+        const height = (rowHeightAccumulation[row] || 0) - top;
+
+        // Add row header width and column header height offset
+        // The accumulation arrays are relative to the sheet content area (without headers).
+        // The canvas rendering includes row/column headers, so we need to add these offsets
+        // to get the position relative to the canvas container.
+        // Use rowHeaderWidthAndMarginLeft / columnHeaderHeightAndMarginTop to include margin offsets.
+        const offsetX = (skeleton as any).rowHeaderWidthAndMarginLeft || 0;
+        const offsetY = (skeleton as any).columnHeaderHeightAndMarginTop || 0;
+
+        return {
+            left: left + offsetX,
+            top: top + offsetY,
+            width,
+            height,
         };
     }
 
