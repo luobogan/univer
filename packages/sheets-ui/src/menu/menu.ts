@@ -926,14 +926,52 @@ export function menuClipboardDisabledObservable(injector: IAccessor): Observable
         const supportClipboard = clipboardInterfaceService.supportClipboard;
 
         const sheetClipboardService = injector.get(ISheetClipboardService);
+        // 修复：先发初始值，再订阅 lastCopyId$。
+        // 原顺序下，lastCopyId$ 是 BehaviorSubject，订阅时的同步首帧会算出正确值
+        // （复制后 lastCopyId 非空 → !supportClipboard && !lastCopyId === false），
+        // 但紧接着的 subscriber.next(!supportClipboard) 会把它覆盖回 true，
+        // 导致非安全上下文（supportClipboard === false）下「粘贴」菜单项恒灰。
+        subscriber.next(!supportClipboard);
+
         const subscription = sheetClipboardService.copyContentCache().lastCopyId$.subscribe((lastCopyId) => {
             subscriber.next(!supportClipboard && !lastCopyId);
         });
 
-        subscriber.next(!supportClipboard);
-
         return () => subscription.unsubscribe();
     });
+}
+
+/**
+ * Excel 设计器：判断当前选中格是否为「字段占位符格」（如 `📝 ${field_1}`）。
+ * 具体判定由应用层注入：window.__excelDesignIsFieldCell(row, col) => boolean。
+ * 应用层未注册该钩子时恒为 false，不影响原生复制行为。
+ * 用 selectionChanged$ 驱动，保证选区变化时菜单禁用态实时刷新。
+ */
+function getExcelDesignFieldCellDisable$(injector: IAccessor): Observable<boolean> {
+    const selectionManagerService = injector.get(SheetsSelectionsService);
+
+    return selectionManagerService.selectionChanged$.pipe(
+        startWith(null),
+        map(() => {
+            const isFieldCell = (globalThis as any).__excelDesignIsFieldCell;
+            if (typeof isFieldCell !== 'function') return false;
+            try {
+                const primary = selectionManagerService.getCurrentLastSelection()?.primary as Nullable<{
+                    actualRow?: number;
+                    actualColumn?: number;
+                    startRow: number;
+                    startColumn: number;
+                }>;
+                if (!primary) return false;
+                const row = primary.actualRow ?? primary.startRow;
+                const col = primary.actualColumn ?? primary.startColumn;
+                if (row == null || col == null) return false;
+                return !!isFieldCell(row, col);
+            } catch {
+                return false;
+            }
+        })
+    );
 }
 
 export function CopyMenuItemFactory(accessor: IAccessor): IMenuButtonItem {
@@ -943,11 +981,15 @@ export function CopyMenuItemFactory(accessor: IAccessor): IMenuButtonItem {
         type: MenuItemType.BUTTON,
         title: 'sheets-ui.rightClick.copy',
         icon: 'CopyDoubleIcon',
-        disabled$: getCurrentRangeDisable$(accessor, {
-            workbookTypes: [WorkbookCopyPermission],
-            worksheetTypes: [WorksheetCopyPermission],
-            rangeTypes: [RangeProtectionPermissionViewPoint],
-        }),
+        disabled$: combineLatest([
+            getCurrentRangeDisable$(accessor, {
+                workbookTypes: [WorkbookCopyPermission],
+                worksheetTypes: [WorksheetCopyPermission],
+                rangeTypes: [RangeProtectionPermissionViewPoint],
+            }),
+            // Excel 设计器：字段占位符格禁止复制（复制会破坏字段绑定 / 产生重复绑定）
+            getExcelDesignFieldCellDisable$(accessor),
+        ]).pipe(map(([d1, d2]) => d1 || d2)),
         hidden$: getMenuHiddenObservable(accessor, UniverInstanceType.UNIVER_SHEET),
     };
 }
