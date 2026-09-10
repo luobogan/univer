@@ -62,6 +62,12 @@ interface IMenuItemBase<V> {
     hidden$?: Observable<boolean>;
     disabled$?: Observable<boolean>;
     params?: any | Function;
+    /**
+     * When the item has an `icon`, Univer's ribbon normally shows the icon only (no text label).
+     * Set this to `true` to force rendering the title text alongside the icon (used by custom
+     * designer tabs whose functions are not obvious from the icon alone).
+     */
+    showTitle?: boolean;
     /** On observable value that should emit the value of the corresponding selection component. */
     value$?: Observable<V>;
 }

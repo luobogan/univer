@@ -43,7 +43,7 @@ export const ToolbarItem = forwardRef<ITooltipWrapperRef, IDisplayMenuItem<IMenu
         commandService.executeCommand(commandId, params);
     };
 
-    const { tooltip, shortcut, icon, title, label, id, commandId, type, slot, params } = props;
+    const { tooltip, shortcut, icon, title, label, id, commandId, type, slot, params, showTitle } = props;
 
     const tooltipTitle = localeService.t(tooltip ?? '') + (shortcut ? ` (${shortcut})` : '');
 
@@ -233,7 +233,7 @@ export const ToolbarItem = forwardRef<ITooltipWrapperRef, IDisplayMenuItem<IMenu
                         <CustomLabel title={title!} value={value} label={label} />
                     )
                     : (
-                        icon ? <CustomLabel icon={icon} /> : <CustomLabel title={title!} />
+                        icon ? (showTitle ? <CustomLabel icon={icon} title={title!} /> : <CustomLabel icon={icon} />) : <CustomLabel title={title!} />
                     )}
             </ToolbarButton>
         );
